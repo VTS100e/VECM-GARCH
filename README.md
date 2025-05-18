@@ -4,8 +4,6 @@
 
 This Streamlit application provides a comprehensive framework for multivariate time series analysis using Vector Error Correction Models (VECM) and Generalized Autoregressive Conditional Heteroskedasticity (GARCH) modeling. It's designed for economists, financial analysts, and researchers working with cointegrated time series data.
 
-![VECM-GARCH Analysis Tool](https://via.placeholder.com/800x400?text=VECM-GARCH+Analysis+Tool)
-
 ## Features
 
 - **Data Processing**: Upload and preprocess time series data with automatic frequency detection

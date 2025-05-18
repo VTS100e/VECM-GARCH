@@ -1,4 +1,4 @@
-# Time Series Analysis with VECM-GARCH
+# Time Series Analysis with VECM-GARCH on streamlit
 
 ## Overview
 

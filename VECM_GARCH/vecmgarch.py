@@ -65,7 +65,7 @@ def run_johansen_test(data, vecm_lag_order, sig_level=0.05):
     crit_idx = {0.10: 0, 0.05: 1, 0.01: 2}.get(sig_level, 1)
     try:
         if data.empty: raise ValueError("Input data for Johansen test is empty.")
-        # Note: k_ar_diff di Johansen = VECM lag p = VAR lag k - 1
+        
         johansen_test = coint_johansen(data, det_order=det_order_johansen, k_ar_diff=vecm_lag_order)
         r = 0
         lr1 = johansen_test.lr1; cvt = johansen_test.cvt; trace_crit_val = cvt[:, crit_idx]
@@ -154,7 +154,7 @@ def run_vecm_diagnostics(residuals):
     for col in residuals.columns:
         resid_series = residuals[col].dropna()
         output = f"--- VECM Residual Diagnostics for: {col} ---\n"
-        min_points_for_tests = 5 # Minimal poin
+        min_points_for_tests = 5 
         if resid_series.empty or len(resid_series) < min_points_for_tests:
             diagnostics_text[col] = output + f"No valid data or too few points ({len(resid_series)}) for diagnostics."
             log_message += f"Skipped VECM diagnostics for {col} (too few points).\n"
@@ -227,7 +227,7 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
         return {}, {}, {}, "Residuals not available for GARCH analysis."
 
     output_log = f"--- GARCH Settings Used: Model={garch_model_type}, p={garch_p}, q={garch_q}, dist='{garch_dist}' ---"
-    o_lag = 0  # o lag untuk asymmetry (Standard GARCH=0)
+    o_lag = 0  # o lag asymmetry (Standard GARCH=0)
     if garch_model_type == "GJR-GARCH":
         output_log += " (o=1 implicit)"; o_lag = 1
     elif garch_model_type == "EGARCH":
@@ -274,16 +274,16 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
         try:
             fig_resid, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
             plot_index = resid_series.index if isinstance(resid_series.index, pd.DatetimeIndex) else np.arange(len(resid_series))
-            axs[0].plot(plot_index, resid_series) # Plot data asli
+            axs[0].plot(plot_index, resid_series) 
             axs[0].set_title(f'VECM Residuals for {col} (Original Scale - Input)')
-            axs[1].plot(plot_index, resid_series**2) # Plot kuadrat data asli
+            axs[1].plot(plot_index, resid_series**2)
             axs[1].set_title(f'Squared VECM Residuals for {col}')
             plt.tight_layout()
             garch_plots[f'{col}_residuals_input'] = fig_resid
         except Exception as e_plot_in:
             output_log += f"\nWarning: Could not plot input residuals for {col}: {e_plot_in}"
             garch_plots[f'{col}_residuals_input'] = None
-            if fig_resid: plt.close(fig_resid) # Pastikan ditutup jika error
+            if fig_resid: plt.close(fig_resid)
 
         # ---  GARCH Model ---
         garch_model_obj = None; garch_results = None; std_resid = None; model_desc = "N/A"
@@ -330,7 +330,7 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
                 # 2. Ljung-Box for squared Standarization Residual  (left over ARCH Effects)
                 try:
                     lags = min(lags_arch_garch, len(std_resid)//2 - 1)
-                    if lags > 0 and lags < len(std_resid): # Pastikan lag valid
+                    if lags > 0 and lags < len(std_resid):
                         lb_test_sq = acorr_ljungbox(std_resid**2, lags=[lags], return_df=True, boxpierce=False)
                         p_val_sq = lb_test_sq.loc[lags, 'lb_pvalue']
                         diag_text += f"\nLjung-Box ARCH Test (Sq.Std.Resids, lags={lags}):\n{lb_test_sq.to_string()}\n"
@@ -427,7 +427,7 @@ if uploaded_file is not None:
         try:
             data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
         except (UnicodeDecodeError, pd.errors.ParserError) as e1:
-        #st.warning(f"Failed reading with comma separator ({e1}), trying semicolon...")
+        
             try:
                 uploaded_file.seek(0)
                 data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, sep=';')
@@ -655,7 +655,6 @@ if uploaded_file is not None:
 
                         except Exception as e_gamma:
                             col3.error(f"Error Gamma CSV: {e_gamma}")
-                        # -----------------------------------------------------
 
                     elif r == 0:
                         st.warning("VECM not estimated (r=0). No coefficients to download.")
@@ -938,14 +937,14 @@ if uploaded_file is not None:
                                 except Exception as e_gamma_zip: zip_file.writestr(f"{file_counter:02d}_VECM_Gamma_Coeffs_Error.txt", f"Error: {e_gamma_zip}")
                                 file_counter += 1
 
-                                # 9. Deterministic Coefficients (if exist)
+                                # 9. Deterministic Coefficients 
                                 if hasattr(vecm_results_model, 'det_coefs') and vecm_results_model.det_coefs is not None:
                                     try:
                                         det_cols = [f'det_term_{i+1}' for i in range(vecm_results_model.det_coefs.shape[1])]
                                         if used_det == 'co': det_cols = ['const_coint']
                                         elif used_det == 'ci': det_cols = ['const_level']
                                         elif used_det == 'const': det_cols = ['const_level'] + [f'const_ect{i+1}' for i in range(r)]
-                                        # (Perlu penanganan lebih lanjut untuk 'lo', 'li', 'none')
+                                        
 
                                         det_df_zip = pd.DataFrame(vecm_results_model.det_coefs, index=data.columns, columns=det_cols[:vecm_results_model.det_coefs.shape[1]])
                                         det_csv_bytes = df_to_csv_bytes(det_df_zip, "vecm_det_coeffs.csv")
@@ -956,9 +955,9 @@ if uploaded_file is not None:
                                      zip_file.writestr(f"{file_counter:02d}_VECM_Deterministic_Coeffs_NA.txt", "Deterministic coefficients not applicable or not found.")
                                 file_counter += 1
 
-                            else: # Jika VECM tidak diestimasi
+                            else:
                                 zip_file.writestr(f"{file_counter:02d}_VECM_Estimation_Skipped.txt", f"VECM skipped or failed (r={r}). No summary or coeffs generated."); file_counter += 1
-                                file_counter += 4 # Skip nomor file untuk alpha, beta, gamma, det
+                                file_counter += 4 
 
 
                             # 10. IRF Numeric Values

@@ -50,5 +50,5 @@ The application implements a rigorous statistical workflow:
 pip install -r requirements.txt
 
 # Run the application
-streamlit run v12.py
+streamlit run vecmgarch.py
 ```

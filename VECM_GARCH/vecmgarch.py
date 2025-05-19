@@ -380,7 +380,7 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
 
 st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
 st.title("VECM-GARCH Analysis (Alpha) ")
-st.markdown("""This 'software' performs VECM, IRF, and GARCH analysis as a default on uploaded time series data.
+st.markdown("""This application performs VECM, IRF, and GARCH analysis as a default on uploaded time series data.
 **GARCH modeling includes options for Standard GARCH, EGARCH, and GJR-GARCH.**
 **You can download all text results as a ZIP file after running the analysis.**
 For a detailed explanation of the analytical steps and methods used, please scroll down.""")

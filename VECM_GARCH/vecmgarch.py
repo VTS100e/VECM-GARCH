@@ -92,14 +92,12 @@ def estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice='
     except (ValueError, TypeError):
         st.error(f"Invalid rank '{r}' provided to estimate_vecm. Setting rank to 0.")
         rank_r = 0
-
     if rank_r <= 0:
-        return None, None, None, f"No cointegration (r={rank_r}) or Johansen failed. VECM not estimated.", deterministic_choice
+        return None, None, f"No cointegration (r={rank_r}) or Johansen failed. VECM not estimated.", deterministic_choice
 
-    #  selected_lags integer check
     if not isinstance(selected_lags, int):
         st.error(f"Invalid selected_lags '{selected_lags}' for VECM residual calculation. Cannot proceed.")
-        return None, None, None, f"VECM estimation failed due to invalid selected_lags.", deterministic_choice
+        return None, None, f"VECM estimation failed due to invalid selected_lags.", deterministic_choice
 
     try:
         if data.empty: raise ValueError("Input data for VECM estimation is empty.")
@@ -110,26 +108,22 @@ def estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice='
         vecm_results = model_vecm.fit()
         summary_text = vecm_results.summary().as_text()
 
-        # Residuals Calculation
         residuals_np = vecm_results.resid
-        residual_start_index = selected_lags # VAR lag = VECM lag + 1
+        residual_start_index = selected_lags
         if len(data.index) > residual_start_index:
-
              residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
         else:
-             # Short data check
              st.warning(f"Not enough data points ({len(data.index)}) to align residuals after VAR lags ({selected_lags}). Residual index may not match original dates.")
-
              residual_index = pd.RangeIndex(start=0, stop=len(residuals_np), step=1)
              residuals = pd.DataFrame(residuals_np, index=residual_index, columns=data.columns)
-
         return vecm_results, residuals, summary_text, deterministic_choice
-    except ValueError as ve: # for catching specific error from VECM
+    
+    except ValueError as ve:
         st.error(f"Error during VECM estimation setup: {ve}")
-        return None, None, None, f"VECM estimation failed: {ve}", deterministic_choice
+        return None, None, f"VECM estimation failed: {ve}", deterministic_choice
     except Exception as e:
         st.error(f"Error during VECM estimation execution with deterministic='{deterministic_choice}', rank={rank_r}: {e}\nTraceback:\n{traceback.format_exc()}")
-        return None, None, None, f"Error during VECM estimation execution: {e}", deterministic_choice
+        return None, None, f"Error during VECM estimation execution: {e}", deterministic_choice
 
 
 # --- VECM Diagnostics Residuals Function ---
@@ -518,6 +512,14 @@ if uploaded_file is not None:
                     if vecm_lag_order < 0: st.warning(f"VAR lag ({selected_lags}) => VECM lag < 0. Setting VECM p=0."); vecm_lag_order = 0
                     r, johansen_summary, used_sig = run_johansen_test(data, vecm_lag_order, sig_level=johansen_sig)
                     vecm_results_model, residuals, vecm_summary, used_det = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    returned_values = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    if len(returned_values) == 5: 
+                        vecm_results_model, residuals, vecm_summary, vecm_message, used_det_from_func = returned_values
+                        if vecm_message: 
+                            vecm_summary = vecm_message 
+                        used_det = used_det_from_func 
+                    else: 
+                        vecm_results_model, residuals, vecm_summary, used_det = returned_values
 
                     # --- 3. IRF Calculation ---
                     irf_results = None; irf_summary_text = "IRF not calculated."; irf_vals = None; irf_stderr = None

@@ -122,9 +122,9 @@ def estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice='
 
         residuals_np = vecm_results.resid
         residual_start_index = selected_lags
-         if len(data.index) >= residual_start_index and len(residuals_np) == len(data.index) - residual_start_index:
+        if len(data.index) >= residual_start_index and len(residuals_np) == len(data.index) - residual_start_index:
             residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
-        elif len(data.index) > len(residuals_np) and len(residuals_np) > 0:  # Fallback if alignment is tricky
+        elif len(data.index) > len(residuals_np) and len(residuals_np) > 0:  
             st.warning(
                 f"Residual length ({len(residuals_np)}) does not perfectly align with expected start index ({residual_start_index}) based on data length ({len(data.index)}). Using last {len(residuals_np)} dates.")
             residuals = pd.DataFrame(residuals_np, index=data.index[-len(residuals_np):], columns=data.columns)

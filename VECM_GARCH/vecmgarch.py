@@ -44,17 +44,29 @@ def run_adf_test(series, name=''):
         return f"Error during ADF test for {name}: {e}\n"
 
 # ---  Lag VAR Function ---
-def find_optimal_lags(data, maxlags=10, criterion='aic'):
+def find_optimal_lags(data, maxlags=10, criterion='aic', manual_k_ar=None):
+    if manual_k_ar is not None:
+        if isinstance(manual_k_ar, int) and manual_k_ar > 0:
+            summary_text = f"VAR lag (k_ar) manually set to: {manual_k_ar}.\nCriterion-based selection was bypassed."
+            st.info(f"Using manually specified VAR lag (k_ar): {manual_k_ar}")
+            return manual_k_ar, summary_text, "Manual" # Return "Manual" as criterion
+        else:
+            error_msg = f"Invalid manual VAR lag ({manual_k_ar}) provided. It must be a positive integer. Defaulting VAR lag to 2 for safety."
+            st.error(error_msg)
+            return 2, error_msg, "Manual Error"
+
+    # Proceed with automatic selection if manual_k_ar is None
     model_var = VAR(data)
     criterion_lower = criterion.lower()
     try:
         lag_selection_results = model_var.select_order(maxlags=maxlags)
-        selected_lags = getattr(lag_selection_results, criterion_lower)
+        selected_lags_auto = getattr(lag_selection_results, criterion_lower) # Use a different variable name
         summary = lag_selection_results.summary().as_text()
-        return int(selected_lags), summary, criterion
+        return int(selected_lags_auto), summary, criterion
     except Exception as e:
-        st.warning(f"Error during lag selection using {criterion}: {e}. Defaulting VAR lag to 2.")
-        return 2, f"Error during lag selection: {e}.", criterion
+        st.warning(f"Error during lag selection using {criterion.upper()}: {e}. Defaulting VAR lag to 2.")
+        return 2, f"Error during lag selection using {criterion.upper()}: {e}. Defaulted VAR lag to 2.", criterion
+
 
 # --- Johansen Function Test ---
 def run_johansen_test(data, vecm_lag_order, sig_level=0.05):
@@ -110,21 +122,26 @@ def estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice='
 
         residuals_np = vecm_results.resid
         residual_start_index = selected_lags
-        if len(data.index) > residual_start_index:
-             residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
+         if len(data.index) >= residual_start_index and len(residuals_np) == len(data.index) - residual_start_index:
+            residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
+        elif len(data.index) > len(residuals_np) and len(residuals_np) > 0:  # Fallback if alignment is tricky
+            st.warning(
+                f"Residual length ({len(residuals_np)}) does not perfectly align with expected start index ({residual_start_index}) based on data length ({len(data.index)}). Using last {len(residuals_np)} dates.")
+            residuals = pd.DataFrame(residuals_np, index=data.index[-len(residuals_np):], columns=data.columns)
         else:
-             st.warning(f"Not enough data points ({len(data.index)}) to align residuals after VAR lags ({selected_lags}). Residual index may not match original dates.")
-             residual_index = pd.RangeIndex(start=0, stop=len(residuals_np), step=1)
-             residuals = pd.DataFrame(residuals_np, index=residual_index, columns=data.columns)
+            st.warning(
+                f"Not enough data points or mismatch for aligning residuals. Residual index may not match original dates. Data length: {len(data.index)}, VAR lags (k_ar): {selected_lags}, Residuals length: {len(residuals_np)}")
+            residual_index = pd.RangeIndex(start=0, stop=len(residuals_np), step=1)  # Fallback index
+            residuals = pd.DataFrame(residuals_np, index=residual_index, columns=data.columns)
         return vecm_results, residuals, summary_text, deterministic_choice
-    
+
     except ValueError as ve:
         st.error(f"Error during VECM estimation setup: {ve}")
         return None, None, f"VECM estimation failed: {ve}", deterministic_choice
     except Exception as e:
-        st.error(f"Error during VECM estimation execution with deterministic='{deterministic_choice}', rank={rank_r}: {e}\nTraceback:\n{traceback.format_exc()}")
+        st.error(
+            f"Error during VECM estimation execution with deterministic='{deterministic_choice}', rank={rank_r}: {e}\nTraceback:\n{traceback.format_exc()}")
         return None, None, f"Error during VECM estimation execution: {e}", deterministic_choice
-
 
 # --- VECM Diagnostics Residuals Function ---
 def run_vecm_diagnostics(residuals):
@@ -385,12 +402,46 @@ st.sidebar.header("1. Upload Data")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV file (Index: Date)", type=["csv"])
 
 st.sidebar.header("2. Model Parameters")
+
 # VECM
 st.sidebar.subheader("VECM Settings")
-lag_criterion = st.sidebar.selectbox("VAR Lag Criterion", ['AIC', 'BIC', 'HQIC', 'FPE'], index=0, key="lag_crit")
-max_lags_var = st.sidebar.slider(f"Max Lags for {lag_criterion}", 1, 20, 10, key="max_lags")
-johansen_sig = st.sidebar.selectbox("Johansen Test Sig. Level", [0.10, 0.05, 0.01], format_func=lambda x: f"{int(x*100)}%", index=1, key="johan_sig")
-vecm_deterministic = st.sidebar.selectbox("VECM Deterministic Term", ['co', 'ci', 'const', 'lo', 'li', 'none'], index=0, key="vecm_det")
+manual_lag_toggle = st.sidebar.checkbox(
+    "Manually Specify VAR Lag (k_ar)?",
+    value=st.session_state.get('manual_lag_active_mem', False), 
+    key="manual_lag_active_cb",
+    help="Check this to directly input the VAR lag order (k_ar). If unchecked, lag will be chosen by criterion."
+)
+st.session_state.manual_lag_active_mem = manual_lag_toggle 
+
+user_manual_k_ar = None
+default_lag_criterion = st.session_state.get('lag_crit_mem', 'AIC')
+default_max_lags = st.session_state.get('max_lags_mem', 10)
+default_manual_k_ar_val = st.session_state.get('manual_k_ar_input_mem', 2)
+
+
+if manual_lag_toggle:
+    user_manual_k_ar = st.sidebar.number_input(
+        "Enter VAR Lag (k_ar)",
+        min_value=1,  
+        max_value=20, 
+        value=default_manual_k_ar_val,
+        key="manual_k_ar_val_input",
+        help="Specify the lag order (k_ar) for the VAR model in levels. The VECM lag (p) will be k_ar - 1."
+    )
+    st.session_state.manual_k_ar_input_mem = user_manual_k_ar 
+    lag_criterion_choice = st.sidebar.selectbox(
+        "VAR Lag Criterion", [default_lag_criterion], index=0,
+        key="lag_crit_disabled", disabled=True, help="Disabled in manual lag mode."
+    )
+    max_lags_choice = st.sidebar.slider(
+        f"Max Lags for Criterion", 1, 20, default_max_lags,
+        key="max_lags_disabled", disabled=True, help="Disabled in manual lag mode."
+    )
+else:
+    lag_criterion = st.sidebar.selectbox("VAR Lag Criterion", ['AIC', 'BIC', 'HQIC', 'FPE'], index=0, key="lag_crit")
+    max_lags_var = st.sidebar.slider(f"Max Lags for {lag_criterion}", 1, 20, 10, key="max_lags")
+    johansen_sig = st.sidebar.selectbox("Johansen Test Sig. Level", [0.10, 0.05, 0.01], format_func=lambda x: f"{int(x*100)}%", index=1, key="johan_sig")
+    vecm_deterministic = st.sidebar.selectbox("VECM Deterministic Term", ['co', 'ci', 'const', 'lo', 'li', 'none'], index=0, key="vecm_det")
 
 # IRF
 st.sidebar.subheader("IRF Settings")

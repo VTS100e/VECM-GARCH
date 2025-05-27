@@ -527,13 +527,18 @@ if uploaded_file is not None:
 
         # --- Run Analysis Button ---
         if st.button("Run Full Analysis"):
-            info_msg = (f"Running analysis: Max Lags={max_lags_var}, Crit={lag_criterion.upper()}, "
+            lag_setting_description = ""
+            if manual_lag_toggle and user_manual_k_ar is not None:
+                lag_setting_description = f"Manual VAR Lag (k_ar)={user_manual_k_ar}"
+            else:
+                lag_setting_description = f"VAR Lag Criterion={lag_criterion_choice.upper()} (Max Lags={max_lags_choice})"
+
+            info_msg = (f"Running analysis: {lag_setting_description}, "
                         f"Johansen Sig={johansen_sig*100}%, VECM Det={vecm_deterministic}, "
                         f"IRF={'Yes (' + str(irf_periods) + ' steps)' if run_irf_analysis else 'No'}, "
                         f"GARCH={garch_model_type_selection}(p={garch_p_order},q={garch_q_order}), Dist={garch_distribution}")
             st.info(info_msg)
 
-            # Initialize the result variable
             adf_results_text_dict = {}
             selected_lags = None; lag_summary = "Lag selection not performed."; used_criterion = lag_criterion
             vecm_lag_order = None; r = 0; johansen_summary = "Johansen test not performed."; used_sig = johansen_sig
@@ -558,19 +563,28 @@ if uploaded_file is not None:
                         st.warning("Warning: Not all series appear stationary at 1st difference (ADF p>0.05). VECM assumptions may be violated.")
 
                     # --- 2. VECM Estimation Steps ---
-                    selected_lags, lag_summary, used_criterion = find_optimal_lags(data, maxlags=max_lags_var, criterion=lag_criterion)
+                    current_k_ar_for_function = None
+                    if manual_lag_toggle:
+                        current_k_ar_for_function = user_manual_k_ar 
+                    
+                    selected_lags, lag_summary, used_criterion = find_optimal_lags(data, maxlags=max_lags_choice, criterion=lag_criterion_choice, manual_k_ar=current_k_ar_for_function)
                     vecm_lag_order = selected_lags - 1
-                    if vecm_lag_order < 0: st.warning(f"VAR lag ({selected_lags}) => VECM lag < 0. Setting VECM p=0."); vecm_lag_order = 0
+                    if vecm_lag_order < 0:
+                        st.warning(f"VAR lag (k_ar={selected_lags}) results in VECM lag (p) < 0. Setting VECM p=0.")
+                        vecm_lag_order = 0
+                    
                     r, johansen_summary, used_sig = run_johansen_test(data, vecm_lag_order, sig_level=johansen_sig)
-                    vecm_results_model, residuals, vecm_summary, used_det = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
-                    returned_values = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
-                    if len(returned_values) == 5: 
-                        vecm_results_model, residuals, vecm_summary, vecm_message, used_det_from_func = returned_values
-                        if vecm_message: 
-                            vecm_summary = vecm_message 
-                        used_det = used_det_from_func 
-                    else: 
-                        vecm_results_model, residuals, vecm_summary, used_det = returned_values
+                      returned_values_vecm = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    if len(returned_values_vecm) == 4:
+                        vecm_results_model, residuals, vecm_summary, used_det = returned_values_vecm
+                    elif len(returned_values_vecm) == 5:
+                        vecm_results_model, residuals, vecm_summary, _unused_message, used_det = returned_values_vecm
+                    else:
+                        st.error("Unexpected return from estimate_vecm. Check function definition.")
+                      
+                        vecm_results_model, residuals, vecm_summary, used_det = None, None, "VECM estimation failed (unexpected return).", vecm_deterministic
+
+                    
 
                     # --- 3. IRF Calculation ---
                     irf_results = None; irf_summary_text = "IRF not calculated."; irf_vals = None; irf_stderr = None
@@ -653,8 +667,17 @@ if uploaded_file is not None:
                 # ========================================================================
                 with tabs[1]:
                     st.header("2. VECM Estimation")
-                    st.subheader(f"2.1 VAR Lag Order Selection"); st.markdown(f"**Crit:** `{used_criterion.upper()}`, **Max Lags:** `{max_lags_var}`"); st.text(f"Selected VAR lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\nImplied VECM lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}");
-                    with st.expander("Show Lag Selection Summary"): st.text(lag_summary if lag_summary else "N/A")
+                    lag_display_info = ""
+                    if used_criterion == "Manual":
+                        lag_display_info = f"**Mode:** `Manual`, **Specified VAR Lag (k_ar):** `{selected_lags if selected_lags is not None else 'N/A'}`"
+                    elif used_criterion == "Manual Error":
+                        lag_display_info = f"**Mode:** `Manual (Error)`, **Defaulted VAR Lag (k_ar):** `{selected_lags if selected_lags is not None else 'N/A'}`"
+                    else:
+                        lag_display_info = f"**Crit:** `{used_criterion.upper()}`, **Max Lags Tested:** `{max_lags_choice}`"
+                    
+                    st.subheader(f"2.1 VAR Lag Order Selection"); st.markdown(lag_display_info);
+                    st.text(f"Selected VAR lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\nImplied VECM lag (p = k_ar - 1): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}");
+                    with st.expander("Show Lag Selection Summary/Message"): st.text(lag_summary if lag_summary else "N/A")
                     st.divider()
                     st.subheader(f"2.2 Johansen Cointegration Test"); st.markdown(f"**Sig. Level:** `{used_sig*100}%`"); st.text(f"Determined Rank (r): {r}");
                     with st.expander("Show Johansen Test Output"): st.text(johansen_summary if johansen_summary else "N/A")
@@ -929,13 +952,24 @@ if uploaded_file is not None:
                             params_text = f"Analysis Parameters:\n"
                             params_text += f"Data File: {uploaded_file.name if uploaded_file else 'N/A'}\n"
                             params_text += f"Processed Data Shape: {data.shape if data is not None else 'N/A'}\n"
-                            params_text += f"Lag Criterion: {used_criterion.upper()}\nMax Lags Tested: {max_lags_var}\n"
+                            if used_criterion == "Manual":
+                                params_text += f"VAR Lag (k_ar) Setting: Manually specified\n"
+                            elif used_criterion == "Manual Error":
+                                params_text += f"VAR Lag (k_ar) Setting: Manual input error, defaulted\n"
+                                params_text += f"Details: {lag_summary}\n"
+                            else:
+                                params_text += f"VAR Lag (k_ar) Setting: Criterion-based ({used_criterion.upper()})\n"
+                                params_text += f"Max Lags Tested for Criterion: {max_lags_choice}\n" 
+                            
+                            params_text += f"Selected VAR Lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\n"
+                            params_text += f"Implied VECM Lag (p = k_ar - 1): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n"
                             params_text += f"Johansen Sig Level: {used_sig * 100}%\nDetermined Rank (r): {r}\n"
-                            params_text += f"VECM Deterministic Term: {used_det}\nVECM Lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n"
+                            params_text += f"VECM Deterministic Term: {used_det}\n" 
                             params_text += f"Run IRF Analysis: {'Yes' if run_irf_analysis else 'No'}\n"
                             if run_irf_analysis: params_text += f"IRF Periods: {irf_periods}\n"
                             params_text += f"GARCH Model Type: {garch_model_type_selection}\nGARCH p: {garch_p_order}, q: {garch_q_order}\nGARCH Distribution: {garch_distribution}\n"
                             zip_file.writestr(f"{file_counter:02d}_Parameters_Used.txt", params_text); file_counter += 1
+
 
                             # 2. ADF Test Results
                             adf_full_text = "--- ADF Test Results ---\n(Significance Level: 5%)\n\n"

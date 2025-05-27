@@ -564,25 +564,30 @@ if uploaded_file is not None:
 
                     # --- 2. VECM Estimation Steps ---
                     current_k_ar_for_function = None
-                    if manual_lag_toggle:
+                    if manual_lag_toggle: 
                         current_k_ar_for_function = user_manual_k_ar 
                     
-                    selected_lags, lag_summary, used_criterion = find_optimal_lags(data, maxlags=max_lags_choice, criterion=lag_criterion_choice, manual_k_ar=current_k_ar_for_function)
+                    selected_lags, lag_summary, used_criterion = find_optimal_lags(
+                        data,
+                        maxlags=max_lags_choice, 
+                        criterion=lag_criterion_choice, 
+                        manual_k_ar=current_k_ar_for_function 
+                    )
+
                     vecm_lag_order = selected_lags - 1
                     if vecm_lag_order < 0:
                         st.warning(f"VAR lag (k_ar={selected_lags}) results in VECM lag (p) < 0. Setting VECM p=0.")
                         vecm_lag_order = 0
-                    
                     r, johansen_summary, used_sig = run_johansen_test(data, vecm_lag_order, sig_level=johansen_sig)
-                      returned_values_vecm = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    returned_values_vecm = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
                     if len(returned_values_vecm) == 4:
                         vecm_results_model, residuals, vecm_summary, used_det = returned_values_vecm
-                    elif len(returned_values_vecm) == 5:
+                    elif len(returned_values_vecm) == 5: 
                         vecm_results_model, residuals, vecm_summary, _unused_message, used_det = returned_values_vecm
                     else:
                         st.error("Unexpected return from estimate_vecm. Check function definition.")
-                      
                         vecm_results_model, residuals, vecm_summary, used_det = None, None, "VECM estimation failed (unexpected return).", vecm_deterministic
+
 
                     
 

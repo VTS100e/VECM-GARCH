@@ -801,7 +801,7 @@ if uploaded_file is not None:
 
                 # --- Tab 5: GARCH Modeling ---
                 with tabs[4]:
-                   st.header(f"5. GARCH Modeling ({current_garch_model_type})")
+                    st.header(f"5. GARCH Modeling ({current_garch_model_type})")
                     st.markdown(f"**Model:** `{current_garch_model_type}`, **Order:** `p={current_garch_p}, q={current_garch_q}`" + (", o=1" if current_garch_model_type in ["EGARCH", "GJR-GARCH"] else ""))
                     st.markdown(f"**Distribution:** `{current_garch_dist}`"); st.markdown("_Applied to VECM Residuals_")
                     if garch_log: st.info(garch_log); st.divider()

@@ -534,7 +534,7 @@ if uploaded_file is not None:
 
         # --- Run Analysis Button ---
         if st.button("Run Full Analysis"):
-             current_johansen_sig = st.session_state.johan_sig
+            current_johansen_sig = st.session_state.johan_sig
             current_vecm_deterministic = st.session_state.vecm_det
             current_irf_periods = st.session_state.irf_steps
             current_run_irf_analysis = st.session_state.run_irf 

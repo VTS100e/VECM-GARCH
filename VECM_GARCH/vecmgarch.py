@@ -595,12 +595,7 @@ if uploaded_file is not None:
                         st.warning("Warning: Not all series appear stationary at 1st difference (ADF p>0.05). VECM assumptions may be violated.")
 
                     # --- 2. VECM Estimation Steps ---
-                   selected_lags, lag_summary, used_criterion_from_func = find_optimal_lags(
-                        data,
-                        maxlags=param_max_lags_for_function,
-                        criterion=param_criterion_for_function,
-                        manual_k_ar=param_k_ar_for_function 
-                    )
+                    selected_lags, lag_summary, used_criterion_from_func = find_optimal_lags(data, maxlags=param_max_lags_for_function, criterion=param_criterion_for_function, manual_k_ar=param_k_ar_for_function)
                     used_criterion = used_criterion_from_func 
 
                     vecm_lag_order = selected_lags - 1

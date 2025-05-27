@@ -527,16 +527,25 @@ if uploaded_file is not None:
 
         # --- Run Analysis Button ---
         if st.button("Run Full Analysis"):
+            current_johansen_sig = st.session_state.johan_sig
+            current_vecm_deterministic = st.session_state.vecm_det
+            current_irf_periods = st.session_state.irf_steps
+            current_run_irf_analysis = st.session_state.run_irf
+            current_garch_model_type = st.session_state.garch_type_select
+            current_garch_p = st.session_state.garch_p
+            current_garch_q = st.session_state.garch_q
+            current_garch_dist = st.session_state.garch_dist
+
             lag_setting_description = ""
-            if manual_lag_toggle and user_manual_k_ar is not None:
-                lag_setting_description = f"Manual VAR Lag (k_ar)={user_manual_k_ar}"
+            if manual_lag_toggle:
+                lag_setting_description = f"Manual VAR Lag (k_ar)={st.session_state.manual_k_ar_val_input}"
             else:
                 lag_setting_description = f"VAR Lag Criterion={lag_criterion_choice.upper()} (Max Lags={max_lags_choice})"
 
             info_msg = (f"Running analysis: {lag_setting_description}, "
-                        f"Johansen Sig={johansen_sig*100}%, VECM Det={vecm_deterministic}, "
-                        f"IRF={'Yes (' + str(irf_periods) + ' steps)' if run_irf_analysis else 'No'}, "
-                        f"GARCH={garch_model_type_selection}(p={garch_p_order},q={garch_q_order}), Dist={garch_distribution}")
+                        f"Johansen Sig={current_johansen_sig*100}%, VECM Det={current_vecm_deterministic}, "
+                        f"IRF={'Yes (' + str(current_irf_periods) + ' steps)' if current_run_irf_analysis else 'No'}, "
+                        f"GARCH={current_garch_model_type}(p={current_garch_p},q={current_garch_q}), Dist={current_garch_dist}")
             st.info(info_msg)
 
             adf_results_text_dict = {}

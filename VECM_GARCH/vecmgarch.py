@@ -44,29 +44,17 @@ def run_adf_test(series, name=''):
         return f"Error during ADF test for {name}: {e}\n"
 
 # ---  Lag VAR Function ---
-def find_optimal_lags(data, maxlags=10, criterion='aic', manual_k_ar=None):
-    if manual_k_ar is not None:
-        if isinstance(manual_k_ar, int) and manual_k_ar > 0:
-            summary_text = f"VAR lag (k_ar) manually set to: {manual_k_ar}.\nCriterion-based selection was bypassed."
-            st.info(f"Using manually specified VAR lag (k_ar): {manual_k_ar}")
-            return manual_k_ar, summary_text, "Manual" # Return "Manual" as criterion
-        else:
-            error_msg = f"Invalid manual VAR lag ({manual_k_ar}) provided. It must be a positive integer. Defaulting VAR lag to 2 for safety."
-            st.error(error_msg)
-            return 2, error_msg, "Manual Error"
-
-    # Proceed with automatic selection if manual_k_ar is None
+def find_optimal_lags(data, maxlags=10, criterion='aic'):
     model_var = VAR(data)
     criterion_lower = criterion.lower()
     try:
         lag_selection_results = model_var.select_order(maxlags=maxlags)
-        selected_lags_auto = getattr(lag_selection_results, criterion_lower) # Use a different variable name
+        selected_lags = getattr(lag_selection_results, criterion_lower)
         summary = lag_selection_results.summary().as_text()
-        return int(selected_lags_auto), summary, criterion
+        return int(selected_lags), summary, criterion
     except Exception as e:
-        st.warning(f"Error during lag selection using {criterion.upper()}: {e}. Defaulting VAR lag to 2.")
-        return 2, f"Error during lag selection using {criterion.upper()}: {e}. Defaulted VAR lag to 2.", criterion
-
+        st.warning(f"Error during lag selection using {criterion}: {e}. Defaulting VAR lag to 2.")
+        return 2, f"Error during lag selection: {e}.", criterion
 
 # --- Johansen Function Test ---
 def run_johansen_test(data, vecm_lag_order, sig_level=0.05):
@@ -77,7 +65,7 @@ def run_johansen_test(data, vecm_lag_order, sig_level=0.05):
     crit_idx = {0.10: 0, 0.05: 1, 0.01: 2}.get(sig_level, 1)
     try:
         if data.empty: raise ValueError("Input data for Johansen test is empty.")
-        
+
         johansen_test = coint_johansen(data, det_order=det_order_johansen, k_ar_diff=vecm_lag_order)
         r = 0
         lr1 = johansen_test.lr1; cvt = johansen_test.cvt; trace_crit_val = cvt[:, crit_idx]
@@ -122,26 +110,21 @@ def estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice='
 
         residuals_np = vecm_results.resid
         residual_start_index = selected_lags
-        if len(data.index) >= residual_start_index and len(residuals_np) == len(data.index) - residual_start_index:
-            residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
-        elif len(data.index) > len(residuals_np) and len(residuals_np) > 0:  
-            st.warning(
-                f"Residual length ({len(residuals_np)}) does not perfectly align with expected start index ({residual_start_index}) based on data length ({len(data.index)}). Using last {len(residuals_np)} dates.")
-            residuals = pd.DataFrame(residuals_np, index=data.index[-len(residuals_np):], columns=data.columns)
+        if len(data.index) > residual_start_index:
+             residuals = pd.DataFrame(residuals_np, index=data.index[residual_start_index:], columns=data.columns)
         else:
-            st.warning(
-                f"Not enough data points or mismatch for aligning residuals. Residual index may not match original dates. Data length: {len(data.index)}, VAR lags (k_ar): {selected_lags}, Residuals length: {len(residuals_np)}")
-            residual_index = pd.RangeIndex(start=0, stop=len(residuals_np), step=1)  # Fallback index
-            residuals = pd.DataFrame(residuals_np, index=residual_index, columns=data.columns)
+             st.warning(f"Not enough data points ({len(data.index)}) to align residuals after VAR lags ({selected_lags}). Residual index may not match original dates.")
+             residual_index = pd.RangeIndex(start=0, stop=len(residuals_np), step=1)
+             residuals = pd.DataFrame(residuals_np, index=residual_index, columns=data.columns)
         return vecm_results, residuals, summary_text, deterministic_choice
 
     except ValueError as ve:
         st.error(f"Error during VECM estimation setup: {ve}")
         return None, None, f"VECM estimation failed: {ve}", deterministic_choice
     except Exception as e:
-        st.error(
-            f"Error during VECM estimation execution with deterministic='{deterministic_choice}', rank={rank_r}: {e}\nTraceback:\n{traceback.format_exc()}")
+        st.error(f"Error during VECM estimation execution with deterministic='{deterministic_choice}', rank={rank_r}: {e}\nTraceback:\n{traceback.format_exc()}")
         return None, None, f"Error during VECM estimation execution: {e}", deterministic_choice
+
 
 # --- VECM Diagnostics Residuals Function ---
 def run_vecm_diagnostics(residuals):
@@ -402,69 +385,35 @@ st.sidebar.header("1. Upload Data")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV file (Index: Date)", type=["csv"])
 
 st.sidebar.header("2. Model Parameters")
-
 # VECM
 st.sidebar.subheader("VECM Settings")
-manual_lag_toggle = st.sidebar.checkbox(
-    "Manually Specify VAR Lag (k_ar)?",
-    value=st.session_state.get('manual_lag_active_mem', False),
-    key="manual_lag_active_cb", 
-    help="Check this to directly input the VAR lag order (k_ar). If unchecked, lag will be chosen by criterion."
-)
-st.session_state.manual_lag_active_mem = manual_lag_toggle
+use_manual_lag = st.sidebar.checkbox("Manually select lag", value=False, key="use_manual_lag")
+if use_manual_lag:
+    manual_lag = st.sidebar.number_input("Manual VAR Lag (k_ar)", min_value=1, max_value=20, value=2, key="manual_lag")
+    lag_criterion = "Manual"
+    max_lags_var = manual_lag  # Set max_lags_var to manual_lag for consistency
+    st.sidebar.markdown("*Using manually selected lag*")
+else:
+    lag_criterion = st.sidebar.selectbox("VAR Lag Criterion", ['AIC', 'BIC', 'HQIC', 'FPE'], index=0, key="lag_crit")
+    max_lags_var = st.sidebar.slider(f"Max Lags for {lag_criterion}", 1, 20, 10, key="max_lags")
+johansen_sig = st.sidebar.selectbox("Johansen Test Sig. Level", [0.10, 0.05, 0.01], format_func=lambda x: f"{int(x*100)}%", index=1, key="johan_sig")
+vecm_deterministic = st.sidebar.selectbox("VECM Deterministic Term", ['co', 'ci', 'const', 'lo', 'li', 'none'], index=0, key="vecm_det")
 
-
-default_manual_k_ar_val = st.session_state.get('manual_k_ar_input_mem', 2)
-st.sidebar.number_input( 
-    "Enter VAR Lag (k_ar)",
-    min_value=1,
-    max_value=20,
-    value=default_manual_k_ar_val,
-    key="manual_k_ar_val_input", 
-    help="Specify the lag order (k_ar) for the VAR model in levels. The VECM lag (p) will be k_ar - 1.",
-    disabled=not manual_lag_toggle 
-)
-if manual_lag_toggle: 
-    st.session_state.manual_k_ar_input_mem = st.session_state.manual_k_ar_val_input
-
-default_lag_criterion = st.session_state.get('lag_crit_mem', 'AIC')
-st.sidebar.selectbox(
-    "VAR Lag Criterion", ['AIC', 'BIC', 'HQIC', 'FPE'],
-    index=['AIC', 'BIC', 'HQIC', 'FPE'].index(default_lag_criterion),
-    key="lag_crit",
-    disabled=manual_lag_toggle
-)
-if not manual_lag_toggle: 
-    st.session_state.lag_crit_mem = st.session_state.lag_crit
-
-default_max_lags = st.session_state.get('max_lags_mem', 10)
-current_criterion_for_slider_label = st.session_state.lag_crit if not manual_lag_toggle else default_lag_criterion
-st.sidebar.slider(
-    f"Max Lags for {current_criterion_for_slider_label}", 1, 20, default_max_lags,
-    key="max_lags",
-    disabled=manual_lag_toggle 
-)
-if not manual_lag_toggle: 
-    st.session_state.max_lags_mem = st.session_state.max_lags
-
-
-st.sidebar.selectbox("Johansen Test Sig. Level", [0.10, 0.05, 0.01], format_func=lambda x: f"{int(x*100)}%", index=1, key="johan_sig")
-st.sidebar.selectbox("VECM Deterministic Term", ['co', 'ci', 'const', 'lo', 'li', 'none'], index=0, key="vecm_det")
+# IRF
 st.sidebar.subheader("IRF Settings")
-if 'run_irf' not in st.session_state: 
-    st.session_state.run_irf = True
-st.sidebar.checkbox("Run Impulse Response Function (IRF) Analysis", key="run_irf")
-st.sidebar.number_input("IRF Periods (Steps)", min_value=5, max_value=50, value=st.session_state.get("irf_steps", 10), key="irf_steps", disabled=not st.session_state.run_irf)
+run_irf_analysis = st.sidebar.checkbox("Run Impulse Response Function (IRF) Analysis", value=True, key="run_irf")
+irf_periods = st.sidebar.number_input("IRF Periods (Steps)", min_value=5, max_value=50, value=10, key="irf_steps", disabled=not run_irf_analysis)
+
+# GARCH
 st.sidebar.subheader("GARCH Settings")
-st.sidebar.selectbox(
+garch_model_type_selection = st.sidebar.selectbox(
     "GARCH Model Type",
     ["Standard GARCH", "EGARCH", "GJR-GARCH"], index=0, key="garch_type_select",
     help="Standard GARCH: Symmetric volatility response. EGARCH/GJR-GARCH: Allow asymmetric response to shocks (leverage effect)."
 )
-st.sidebar.number_input("GARCH p order", min_value=0, max_value=5, value=st.session_state.get("garch_p",1) , key="garch_p", help="Order of ARCH/GARCH terms (past shocks/symmetric variance).")
-st.sidebar.number_input("GARCH q order", min_value=0, max_value=5, value=st.session_state.get("garch_q",1), key="garch_q", help="Order of GARCH/Variance lags.")
-st.sidebar.selectbox("GARCH Distribution", ['normal', 't', 'skewt'], index=0, key="garch_dist")
-
+garch_p_order = st.sidebar.number_input("GARCH p order", min_value=0, max_value=5, value=1, key="garch_p", help="Order of ARCH/GARCH terms (past shocks/symmetric variance).")
+garch_q_order = st.sidebar.number_input("GARCH q order", min_value=0, max_value=5, value=1, key="garch_q", help="Order of GARCH/Variance lags.")
+garch_distribution = st.sidebar.selectbox("GARCH Distribution", ['normal', 't', 'skewt'], index=0, key="garch_dist")
 
 
 # ==============================================================
@@ -479,7 +428,7 @@ if uploaded_file is not None:
         try:
             data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
         except (UnicodeDecodeError, pd.errors.ParserError) as e1:
-        
+
             try:
                 uploaded_file.seek(0)
                 data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, sep=';')
@@ -534,49 +483,25 @@ if uploaded_file is not None:
 
         # --- Run Analysis Button ---
         if st.button("Run Full Analysis"):
-            current_johansen_sig = st.session_state.johan_sig
-            current_vecm_deterministic = st.session_state.vecm_det
-            current_irf_periods = st.session_state.irf_steps
-            current_run_irf_analysis = st.session_state.run_irf 
-            current_garch_model_type = st.session_state.garch_type_select
-            current_garch_p = st.session_state.garch_p
-            current_garch_q = st.session_state.garch_q
-            current_garch_dist = st.session_state.garch_dist
-
-            is_manual_mode_active = st.session_state.manual_lag_active_cb
-            
-            lag_setting_description = ""
-            param_k_ar_for_function = None
-            param_max_lags_for_function = None
-            param_criterion_for_function = None
-
-            if is_manual_mode_active:
-                param_k_ar_for_function = st.session_state.manual_k_ar_val_input
-                lag_setting_description = f"Manual VAR Lag (k_ar)={param_k_ar_for_function}"         
-                param_max_lags_for_function = st.session_state.max_lags 
-                param_criterion_for_function = st.session_state.lag_crit 
-            else: 
-                param_max_lags_for_function = st.session_state.max_lags 
-                param_criterion_for_function = st.session_state.lag_crit 
-                lag_setting_description = f"VAR Lag Criterion={param_criterion_for_function.upper()} (Max Lags={param_max_lags_for_function})"
-                
-
-            info_msg = (f"Running analysis: {lag_setting_description}, "
-                        f"Johansen Sig={current_johansen_sig*100}%, VECM Det={current_vecm_deterministic}, "
-                        f"IRF={'Yes (' + str(current_irf_periods) + ' steps)' if current_run_irf_analysis else 'No'}, "
-                        f"GARCH={current_garch_model_type}(p={current_garch_p},q={current_garch_q}), Dist={current_garch_dist}")
+            if use_manual_lag:
+                info_msg = (f"Running analysis: Manual Lag={manual_lag}, "
+                            f"Johansen Sig={johansen_sig*100}%, VECM Det={vecm_deterministic}, "
+                            f"IRF={'Yes (' + str(irf_periods) + ' steps)' if run_irf_analysis else 'No'}, "
+                            f"GARCH={garch_model_type_selection}(p={garch_p_order},q={garch_q_order}), Dist={garch_distribution}")
+            else:
+                info_msg = (f"Running analysis: Max Lags={max_lags_var}, Crit={lag_criterion.upper()}, "
+                            f"Johansen Sig={johansen_sig*100}%, VECM Det={vecm_deterministic}, "
+                            f"IRF={'Yes (' + str(irf_periods) + ' steps)' if run_irf_analysis else 'No'}, "
+                            f"GARCH={garch_model_type_selection}(p={garch_p_order},q={garch_q_order}), Dist={garch_distribution}")
             st.info(info_msg)
 
-          
+            # Initialize the result variable
             adf_results_text_dict = {}
-            selected_lags = None; lag_summary = "Lag selection not performed.";
-            used_criterion = param_criterion_for_function if not is_manual_mode_active else "Manual"
-            vecm_lag_order = None; r = 0; johansen_summary = "Johansen test not performed.";
-            used_sig = current_johansen_sig 
-            vecm_results_model = None; residuals = None; vecm_summary = "VECM not estimated.";
-            used_det = current_vecm_deterministic 
+            selected_lags = None; lag_summary = "Lag selection not performed."; used_criterion = lag_criterion
+            vecm_lag_order = None; r = 0; johansen_summary = "Johansen test not performed."; used_sig = johansen_sig
+            vecm_results_model = None; residuals = None; vecm_summary = "VECM not estimated."; used_det = vecm_deterministic
             vecm_diagnostics_results = {}; vecm_diagnostics_log = ""
-            irf_results = None; irf_summary_text = "IRF not calculated." 
+            irf_results = None; irf_summary_text = "IRF not calculated."
             irf_vals = None; irf_stderr = None
             garch_diags_text = {}; garch_summaries = {}; garch_plots = {}; garch_log = ""
             analysis_successful = True
@@ -595,35 +520,24 @@ if uploaded_file is not None:
                         st.warning("Warning: Not all series appear stationary at 1st difference (ADF p>0.05). VECM assumptions may be violated.")
 
                     # --- 2. VECM Estimation Steps ---
-                    selected_lags, lag_summary, used_criterion_from_func = find_optimal_lags(data, maxlags=param_max_lags_for_function, criterion=param_criterion_for_function, manual_k_ar=param_k_ar_for_function)
-                    used_criterion = used_criterion_from_func 
-
+                    if use_manual_lag:
+                        selected_lags = manual_lag
+                        lag_summary = f"Manual lag selection: VAR lag (k_ar) = {manual_lag}"
+                        used_criterion = "Manual"
+                    else:
+                        selected_lags, lag_summary, used_criterion = find_optimal_lags(data, maxlags=max_lags_var, criterion=lag_criterion)
                     vecm_lag_order = selected_lags - 1
-                    if vecm_lag_order < 0:
-                        st.warning(f"VAR lag (k_ar={selected_lags}) results in VECM lag (p) < 0. Setting VECM p=0.")
-                        vecm_lag_order = 0
-                    
-                   
-                    r_from_func, johansen_summary_from_func, used_sig_from_func = run_johansen_test(data, vecm_lag_order, sig_level=current_johansen_sig)
-                    r = r_from_func
-                    johansen_summary = johansen_summary_from_func
-                    used_sig = used_sig_from_func 
-                    
-                  
-                    returned_values_vecm = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=current_vecm_deterministic)
-                   
-                    if len(returned_values_vecm) == 4:
-                        vecm_results_model, residuals, vecm_summary, used_det_from_func = returned_values_vecm
-                        used_det = used_det_from_func
-                    elif len(returned_values_vecm) == 5: 
-                        vecm_results_model, residuals, vecm_summary, _unused_message, used_det_from_func = returned_values_vecm
-                        used_det = used_det_from_func
+                    if vecm_lag_order < 0: st.warning(f"VAR lag ({selected_lags}) => VECM lag < 0. Setting VECM p=0."); vecm_lag_order = 0
+                    r, johansen_summary, used_sig = run_johansen_test(data, vecm_lag_order, sig_level=johansen_sig)
+                    vecm_results_model, residuals, vecm_summary, used_det = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    returned_values = estimate_vecm(data, vecm_lag_order, r, selected_lags, deterministic_choice=vecm_deterministic)
+                    if len(returned_values) == 5: 
+                        vecm_results_model, residuals, vecm_summary, vecm_message, used_det_from_func = returned_values
+                        if vecm_message: 
+                            vecm_summary = vecm_message 
+                        used_det = used_det_from_func 
                     else: 
-                        st.error("Unexpected return from estimate_vecm. Check function definition.")
-                        vecm_results_model, residuals, vecm_summary, used_det = None, None, "VECM estimation failed (unexpected return).", current_vecm_deterministic
-
-
-                    
+                        vecm_results_model, residuals, vecm_summary, used_det = returned_values
 
                     # --- 3. IRF Calculation ---
                     irf_results = None; irf_summary_text = "IRF not calculated."; irf_vals = None; irf_stderr = None
@@ -706,17 +620,13 @@ if uploaded_file is not None:
                 # ========================================================================
                 with tabs[1]:
                     st.header("2. VECM Estimation")
-                    lag_display_info = ""
-                    if used_criterion == "Manual":
-                        lag_display_info = f"**Mode:** `Manual`, **Specified VAR Lag (k_ar):** `{selected_lags if selected_lags is not None else 'N/A'}`"
-                    elif used_criterion == "Manual Error":
-                        lag_display_info = f"**Mode:** `Manual (Error)`, **Defaulted VAR Lag (k_ar):** `{selected_lags if selected_lags is not None else 'N/A'}`"
+                    st.subheader(f"2.1 VAR Lag Order Selection"); 
+                    if used_criterion.upper() == "MANUAL":
+                        st.markdown(f"**Selection Method:** `Manual`, **Selected Lag:** `{selected_lags}`");
                     else:
-                        lag_display_info = f"**Crit:** `{used_criterion.upper()}`, **Max Lags Tested:** `{max_lags_choice}`"
-                    
-                    st.subheader(f"2.1 VAR Lag Order Selection"); st.markdown(lag_display_info);
-                    st.text(f"Selected VAR lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\nImplied VECM lag (p = k_ar - 1): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}");
-                    with st.expander("Show Lag Selection Summary/Message"): st.text(lag_summary if lag_summary else "N/A")
+                        st.markdown(f"**Crit:** `{used_criterion.upper()}`, **Max Lags:** `{max_lags_var}`");
+                    st.text(f"Selected VAR lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\nImplied VECM lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}");
+                    with st.expander("Show Lag Selection Summary"): st.text(lag_summary if lag_summary else "N/A")
                     st.divider()
                     st.subheader(f"2.2 Johansen Cointegration Test"); st.markdown(f"**Sig. Level:** `{used_sig*100}%`"); st.text(f"Determined Rank (r): {r}");
                     with st.expander("Show Johansen Test Output"): st.text(johansen_summary if johansen_summary else "N/A")
@@ -791,19 +701,19 @@ if uploaded_file is not None:
                 # --- Tab 4: Impulse Responses ---
                 with tabs[3]:
                     st.header(f"4. Impulse Response Functions (IRF)")
-                    if current_run_irf_analysis:
-                        st.markdown(f"Displaying IRFs for **{current_irf_periods}** periods ahead."); st.markdown("_Note: Non-orthogonalized IRFs. 95% CI shown (if available)._")
-                        if irf_results is not None: 
+                    if run_irf_analysis:
+                        st.markdown(f"Displaying IRFs for **{irf_periods}** periods ahead."); st.markdown("_Note: Non-orthogonalized IRFs. 95% CI shown (if available)._")
+                        if irf_results is not None:
                             try: fig_irf = irf_results.plot(orth=False, signif=0.05); st.pyplot(fig_irf); plt.close(fig_irf)
                             except Exception as e_plot_irf: st.error(f"Error plotting IRF: {e_plot_irf}\n{traceback.format_exc()}")
-                        else: st.warning(f"Could not display IRF plots. Reason: {irf_summary_text}") # irf_summary_text dari hasil analisis
+                        else: st.warning(f"Could not display IRF plots. Reason: {irf_summary_text}")
                     else: st.info("IRF analysis disabled.")
 
                 # --- Tab 5: GARCH Modeling ---
                 with tabs[4]:
-                    st.header(f"5. GARCH Modeling ({current_garch_model_type})")
-                    st.markdown(f"**Model:** `{current_garch_model_type}`, **Order:** `p={current_garch_p}, q={current_garch_q}`" + (", o=1" if current_garch_model_type in ["EGARCH", "GJR-GARCH"] else ""))
-                    st.markdown(f"**Distribution:** `{current_garch_dist}`"); st.markdown("_Applied to VECM Residuals_")
+                    st.header(f"5. GARCH Modeling ({garch_model_type_selection})")
+                    st.markdown(f"**Model:** `{garch_model_type_selection}`, **Order:** `p={garch_p_order}, q={garch_q_order}`" + (", o=1" if garch_model_type_selection in ["EGARCH", "GJR-GARCH"] else ""))
+                    st.markdown(f"**Distribution:** `{garch_distribution}`"); st.markdown("_Applied to VECM Residuals_")
                     if garch_log: st.info(garch_log); st.divider()
                     garch_was_run = bool(garch_summaries or garch_diags_text or ("Skipped GARCH" not in garch_log and "GARCH log is empty" not in garch_log))
                     if garch_was_run and residuals is not None and not residuals.empty:
@@ -980,45 +890,46 @@ if uploaded_file is not None:
 
                 with tabs[6]:
                     st.header("7. Download Analysis Results")
+
+
                     zip_buffer = io.BytesIO()
                     try:
                         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                             file_counter = 0
+
+                            # 1. Parameter
                             params_text = f"Analysis Parameters:\n"
                             params_text += f"Data File: {uploaded_file.name if uploaded_file else 'N/A'}\n"
                             params_text += f"Processed Data Shape: {data.shape if data is not None else 'N/A'}\n"
-                            if used_criterion == "Manual":
-                                params_text += f"VAR Lag (k_ar) Setting: Manually specified\n"
-                            elif used_criterion == "Manual Error":
-                                params_text += f"VAR Lag (k_ar) Setting: Manual input error, defaulted\n"
-                                params_text += f"Details: {lag_summary}\n" 
-                            else: 
-                                params_text += f"VAR Lag (k_ar) Setting: Criterion-based ({used_criterion.upper()})\n"
-                                params_text += f"Max Lags Tested for Criterion: {param_max_lags_for_function}\n"
-                            
-                            params_text += f"Selected VAR Lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}\n"
-                            params_text += f"Implied VECM Lag (p = k_ar - 1): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n"
-                            params_text += f"Johansen Sig Level: {used_sig * 100}%\nDetermined Rank (r): {r}\n" 
-                            params_text += f"VECM Deterministic Term: {used_det}\n" 
-                          
-                            params_text += f"Run IRF Analysis: {'Yes' if current_run_irf_analysis else 'No'}\n"
-                            if current_run_irf_analysis: params_text += f"IRF Periods: {current_irf_periods}\n"
-                            params_text += f"GARCH Model Type: {current_garch_model_type}\nGARCH p: {current_garch_p}, q: {current_garch_q}\nGARCH Distribution: {current_garch_dist}\n"
+                            if used_criterion.upper() == "MANUAL":
+                                params_text += f"Lag Selection: Manual\nSelected VAR Lag (k_ar): {selected_lags}\n"
+                            else:
+                                params_text += f"Lag Criterion: {used_criterion.upper()}\nMax Lags Tested: {max_lags_var}\n"
+                            params_text += f"Johansen Sig Level: {used_sig * 100}%\nDetermined Rank (r): {r}\n"
+                            params_text += f"VECM Deterministic Term: {used_det}\nVECM Lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n"
+                            params_text += f"Run IRF Analysis: {'Yes' if run_irf_analysis else 'No'}\n"
+                            if run_irf_analysis: params_text += f"IRF Periods: {irf_periods}\n"
+                            params_text += f"GARCH Model Type: {garch_model_type_selection}\nGARCH p: {garch_p_order}, q: {garch_q_order}\nGARCH Distribution: {garch_distribution}\n"
                             zip_file.writestr(f"{file_counter:02d}_Parameters_Used.txt", params_text); file_counter += 1
-                            
-                            file_counter_at_lag_selection = file_counter 
-                            var_lag_file_idx = 2 
 
-                            lag_selection_text_content = f"--- VAR Lag Order Selection ---\n"
-                            if used_criterion == "Manual":
-                                lag_selection_text_content += f"Mode: Manual\nSpecified VAR Lag (k_ar): {selected_lags}\n"
-                            elif used_criterion == "Manual Error":
-                                lag_selection_text_content += f"Mode: Manual (Error)\nDetails: {lag_summary}\nDefaulted VAR Lag (k_ar): {selected_lags}\n"
-                            else: # Criterion-based
-                                lag_selection_text_content += f"Criterion: {used_criterion.upper()}\nMax Lags Tested: {param_max_lags_for_function}\nSelected VAR Lag (k_ar): {selected_lags}\n"
-                            lag_selection_text_content += f"Implied VECM Lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n\nSelection Output/Message:\n{lag_summary if lag_summary else 'N/A'}"
-                            zip_file.writestr(f"{file_counter:02d}_VAR_Lag_Selection.txt", lag_selection_text_content); file_counter +=1
+                            # 2. ADF Test Results
+                            adf_full_text = "--- ADF Test Results ---\n(Significance Level: 5%)\n\n"
+                            if adf_results_text_dict:
+                                for var_name, results in adf_results_text_dict.items(): adf_full_text += f"--- Variable: {var_name} ---\n{results}\n--------------------\n"
+                            else: adf_full_text += "ADF results dictionary is empty.\n"
+                            zip_file.writestr(f"{file_counter:02d}_ADF_Tests.txt", adf_full_text); file_counter += 1
 
+                            # 3. VAR Lag Selection Summary
+                            lag_selection_text = f"--- VAR Lag Order Selection ---\nCriterion: {used_criterion.upper()}, Max Lags: {max_lags_var}\nSelected VAR Lag (k_ar): {selected_lags if selected_lags is not None else 'N/A'}, Implied VECM Lag (p): {vecm_lag_order if vecm_lag_order is not None else 'N/A'}\n\nSummary Output:\n{lag_summary if lag_summary else 'N/A'}"
+                            zip_file.writestr(f"{file_counter:02d}_VAR_Lag_Selection.txt", lag_selection_text); file_counter += 1
+
+                            # 4. Johansen Test Output
+                            zip_file.writestr(f"{file_counter:02d}_Johansen_Cointegration_Test.txt", johansen_summary if johansen_summary else "N/A"); file_counter += 1
+
+                            # --- VECM Results Files (Summary and Coefficients) ---
+                            if vecm_results_model is not None and r > 0:
+                                # 5. VECM Summary
+                                zip_file.writestr(f"{file_counter:02d}_VECM_Estimation_Summary.txt", vecm_summary if vecm_summary else "N/A"); file_counter += 1
 
                                 # 6. Alpha Coefficients
                                 try:
@@ -1061,7 +972,7 @@ if uploaded_file is not None:
                                         if used_det == 'co': det_cols = ['const_coint']
                                         elif used_det == 'ci': det_cols = ['const_level']
                                         elif used_det == 'const': det_cols = ['const_level'] + [f'const_ect{i+1}' for i in range(r)]
-                                        
+
 
                                         det_df_zip = pd.DataFrame(vecm_results_model.det_coefs, index=data.columns, columns=det_cols[:vecm_results_model.det_coefs.shape[1]])
                                         det_csv_bytes = df_to_csv_bytes(det_df_zip, "vecm_det_coeffs.csv")
@@ -1183,25 +1094,31 @@ else:
                            The Augmented Dickey-Fuller (ADF) test is applied to both the original *levels* and *first differences* of each variable to assess stationarity. The null hypothesis of the ADF test is that the series contains a unit root (non-stationary). A significance level of 5% is used for interpretation:
                            - p-value ≤ 0.05: Reject H₀, series is likely stationary
                            - p-value > 0.05: Fail to reject H₀, series is likely non-stationary
-    
+
                            For VECM, variables should typically be non-stationary in levels but stationary in first differences (I(1) processes).
                            """)
 
         st.markdown("""
-                           **3. Optimal VAR Lag Selection:**
-                           The optimal lag structure for the underlying Vector Autoregression (VAR) model is determined using information criteria through `statsmodels.tsa.api.VAR.select_order()`. Users can select their preferred **Information Criterion**:
+                           **3. VAR Lag Selection:**
+                           The lag structure for the underlying Vector Autoregression (VAR) model can be determined in two ways:
+
+                           **A. Automatic Selection (Default):**
+                           The optimal lag is determined using information criteria through `statsmodels.tsa.api.VAR.select_order()`. Users can select their preferred **Information Criterion**:
                            - **AIC** (Akaike Information Criterion): Tends to select more complex models
                            - **BIC** (Bayesian Information Criterion): Tends to favor parsimony
                            - **HQIC** (Hannan-Quinn Information Criterion): Intermediate between AIC and BIC
                            - **FPE** (Final Prediction Error): Focuses on forecast accuracy
-    
-                           The VECM lag order (`p`) is derived as `p = k_ar - 1`, where `k_ar` is the selected VAR lag order.
+
+                           **B. Manual Selection:**
+                           Users can bypass the automatic selection and directly specify the VAR lag order (`k_ar`) based on prior knowledge or specific research requirements.
+
+                           In both cases, the VECM lag order (`p`) is derived as `p = k_ar - 1`, where `k_ar` is the selected VAR lag order.
                            """)
 
         st.markdown("""
                            **4. Cointegration Testing:**
                            The Johansen cointegration test is performed using `statsmodels.tsa.vector_ar.vecm.coint_johansen()` to determine the number of cointegrating relationships (rank `r`). The test uses the Trace statistic approach, comparing test statistics against critical values at the user-selected significance level (1%, 5%, or 10%).
-    
+
                            The test employs the VECM lag `p` from the previous step and assumes a deterministic order of 0 (constant in the data process). The rank `r` represents the number of independent cointegrating vectors in the system, with:
                            - r = 0: No cointegration (use VAR in differences)
                            - 0 < r < n: Partial cointegration (use VECM)
@@ -1211,7 +1128,7 @@ else:
         st.markdown("""
                            **5. VECM Estimation:**
                            If cointegration is detected (r > 0), a VECM is estimated using `statsmodels.tsa.api.VECM()`. The model incorporates:
-    
+
                            - **Cointegrating rank** (`r`): Number of long-run relationships
                            - **VECM lag** (`p`): Number of lags in differenced terms
                            - **Deterministic term** specification: Controls how constants and trends enter the model
@@ -1221,7 +1138,7 @@ else:
                              - 'lo': Linear trend in cointegration
                              - 'li': Linear trend in levels
                              - 'none': No deterministic terms
-    
+
                            The results provide:
                            - **Alpha** (α): Adjustment coefficients showing speed of adjustment to equilibrium
                            - **Beta** (β): Cointegrating vectors representing long-run equilibrium relationships
@@ -1231,17 +1148,17 @@ else:
         st.markdown("""
                            **6. Impulse Response Function (IRF) Analysis:**
                            If cointegration is detected and a valid VECM is estimated, Impulse Response Function analysis can be performed to examine how variables in the system respond to shocks over time.
-    
+
                            The IRF is calculated using `vecm_results_model.irf(periods=irf_periods)` where:
                            - **periods**: User-specified number of time steps ahead to forecast (5-50)
-    
+
                            IRF analysis provides:
                                - **Dynamic responses** of each variable to shocks in every other variable
                                - **Time path** of effects showing how shocks propagate through the system
                                - **Confidence intervals** (95% by default) to assess statistical significance
-    
+
                            The application displays non-orthogonalized IRFs, which show the combined direct and indirect effects of shocks, providing a comprehensive view of system dynamics without imposing structural assumptions about contemporaneous relationships.
-    
+
                            IRF plots are organized in a matrix where:
                                - Rows represent the **response variables**
                                - Columns represent the **impulse (shock) variables**
@@ -1250,15 +1167,15 @@ else:
         st.markdown("""
                            **7. VECM Residual Diagnostics:**
                            The residuals from the estimated VECM are subjected to diagnostic tests to assess model adequacy:
-    
+
                            - **Ljung-Box test** (`acorr_ljungbox`): Tests for autocorrelation in residuals
                              - H₀: No autocorrelation up to lag k
                              - Significant p-values indicate remaining autocorrelation
-    
+
                            - **ARCH-LM test** (`het_arch`): Tests for ARCH effects (volatility clustering)
                              - H₀: No ARCH effects up to lag k
                              - Significant p-values suggest heteroskedasticity, justifying GARCH modeling
-    
+
                            - **Jarque-Bera test** (`jarque_bera`): Tests for normality of residuals
                              - H₀: Residuals are normally distributed
                              - Significant p-values indicate non-normality
@@ -1267,17 +1184,17 @@ else:
         st.markdown("""
                            **8. GARCH Modeling:**
                            When ARCH effects are detected in VECM residuals, GARCH models are fitted to each residual series using `arch.arch_model()`. Users can select:
-    
+
                            - **GARCH Model Type**:
                              - **Standard GARCH**: Symmetric response to shocks
                              - **EGARCH**: Exponential GARCH allowing asymmetric effects
                              - **GJR-GARCH**: Threshold GARCH capturing leverage effects
-    
+
                            - **Model Orders**:
                              - **p**: Order of ARCH terms (past squared shocks)
                              - **q**: Order of GARCH terms (past conditional variances)
                              - **o**: Order of asymmetry terms (automatically set to 1 for EGARCH and GJR-GARCH)
-    
+
                            - **Error Distribution**:
                              - **normal**: Gaussian distribution
                              - **t**: Student's t-distribution (heavier tails)
@@ -1287,13 +1204,13 @@ else:
         st.markdown("""
                            **9. GARCH Diagnostics:**
                            The standardized residuals from each GARCH model are tested to verify model adequacy:
-    
+
                            - **Ljung-Box test on standardized residuals**: Checks if serial correlation has been removed
-    
+
                            - **Ljung-Box test on squared standardized residuals**: Verifies if ARCH effects have been captured
-    
+
                            - **Jarque-Bera test**: Assesses if the standardized residuals follow the assumed distribution
-    
+
                            A well-specified GARCH model should show no significant autocorrelation or remaining ARCH effects in the standardized residuals.
                            """)
 
@@ -1302,7 +1219,12 @@ else:
     st.markdown("""
                        The application provides extensive analytical flexibility through user-selectable parameters in the sidebar:
 
-                       - **VAR/VECM Parameters**: Lag Criterion, Maximum Lags, Johansen Significance Level, VECM Deterministic Term
+                       - **VAR/VECM Parameters**: 
+                         - Lag Selection: Automatic (using information criteria) or Manual (user-specified)
+                         - Lag Criterion (when using automatic selection): AIC, BIC, HQIC, FPE
+                         - Maximum Lags (when using automatic selection) or Manual Lag Value
+                         - Johansen Significance Level
+                         - VECM Deterministic Term
                        - **GARCH Parameters**: Model Type, Orders (p,q), Error Distribution
 
                        These options allow for tailoring the analysis to specific data characteristics and research questions.
@@ -1313,3 +1235,4 @@ else:
     st.info("""
                        This software serves as a comprehensive analytical tool for time series modeling. The final interpretation of results, selection of the optimal model specification, and research conclusions require expert judgment and domain knowledge. Always ensure your data meets the underlying assumptions of the models used and validate results through multiple approaches.
                        """)
+

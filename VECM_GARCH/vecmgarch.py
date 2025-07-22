@@ -431,7 +431,7 @@ if uploaded_file is not None:
 
             try:
                 uploaded_file.seek(0)
-                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True, sep=';')
+                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
             except Exception as e2:
                 st.error(f"Error reading CSV: {e2}. Tried comma and semicolon separators. Check file format (Index=Date column, Separator=',' or ';').")
                 st.stop()

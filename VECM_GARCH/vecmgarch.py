@@ -21,7 +21,9 @@ def df_to_csv_bytes(df, filename="data.csv"):
     except Exception as e:
         st.error(f"Error converting DataFrame {filename} to CSV: {e}")
         return None
-
+df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
+df.set_index('Date', inplace=True)
+df = df.asfreq('MS')
 # ==============================================================
 # Analysis Function
 # ==============================================================

@@ -426,12 +426,12 @@ if uploaded_file is not None:
     try:
         # --- Data Loading and Preprocessing ---
         try:
-            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
+            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
         except (UnicodeDecodeError, pd.errors.ParserError) as e1:
 
             try:
                 uploaded_file.seek(0)
-                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
+                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, sep=';', dayfirst=True)
             except Exception as e2:
                 st.error(f"Error reading CSV: {e2}. Tried comma and semicolon separators. Check file format (Index=Date column, Separator=',' or ';').")
                 st.stop()

@@ -422,21 +422,32 @@ garch_distribution = st.sidebar.selectbox("GARCH Distribution", ['normal', 't', 
 
 if uploaded_file is not None:
     data = None
-    data_initial = None
-    try:
-        # --- Data Loading and Preprocessing ---
-        try:
-            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
-        except (UnicodeDecodeError, pd.errors.ParserError) as e1:
+   # --- Data Loading and Preprocessing ---
+        data_initial = None
+        # We need to reset the file pointer before each read attempt
+        uploaded_file.seek(0)
 
+        try:
+            # --- Primary Method ---
+            # Attempt 1: Standard parsing (for YYYY-MM-DD like in sk.csv)
+            st.caption("Attempting to read with standard date format...")
+            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
+            st.caption("Success with standard format.")
+            
+        except (ValueError, pd.errors.ParserError):
+            # --- Fallback Method ---
+            # Attempt 2: Day-first parsing (for DD/MM/YYYY like in nn.csv)
+            st.caption("Standard date parsing failed. Attempting with 'dayfirst=True'...")
+            uploaded_file.seek(0) # Reset pointer again for the next try
             try:
-                uploaded_file.seek(0)
-                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, sep=';')
-            except Exception as e2:
-                st.error(f"Error reading CSV: {e2}. Tried comma and semicolon separators. Check file format (Index=Date column, Separator=',' or ';').")
+                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
+                st.caption("Success with day-first format.")
+            except Exception as e_inner:
+                st.error(f"Failed to read CSV with both standard and day-first date formats. Please check your date column. Error: {e_inner}")
                 st.stop()
-        except Exception as e:
-             st.error(f"Unexpected error reading CSV: {e}. Check format (Index=Date, Separator=',' or ';').")
+        
+        except Exception as e_outer:
+             st.error(f"An unexpected error occurred while reading the CSV: {e_outer}")
              st.stop()
 
         if data_initial is None: st.error("Could not load data."); st.stop()

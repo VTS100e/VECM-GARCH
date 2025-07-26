@@ -422,38 +422,52 @@ garch_distribution = st.sidebar.selectbox("GARCH Distribution", ['normal', 't', 
 
 if uploaded_file is not None:
     data = None
-# --- Data Loading and Preprocessing ---
     data_initial = None
-    # We need to reset the file pointer before each read attempt
-    uploaded_file.seek(0)
 
     try:
-        # --- Primary Method ---
-        # Attempt 1: Standard parsing (for YYYY-MM-DD like in sk.csv)
-        st.caption("Attempting to read with standard date format...")
-        data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
-        st.caption("Success with standard format.")
-        
-    except (ValueError, pd.errors.ParserError):
-        # --- Fallback Method ---
-        # Attempt 2: Day-first parsing (for DD/MM/YYYY like in nn.csv)
-        st.caption("Standard date parsing failed. Attempting with 'dayfirst=True'...")
-        uploaded_file.seek(0) # Reset pointer again for the next try
+        # --- Data Loading and Preprocessing ---
+        st.caption("Attempting to load and parse CSV...")
+        # We need to reset the file pointer before each read attempt
+        uploaded_file.seek(0)
+
         try:
-            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
-            st.caption("Success with day-first format.")
-        except Exception as e_inner:
-            st.error(f"Failed to read CSV with both standard and day-first date formats. Please check your date column. Error: {e_inner}")
-            st.stop()
-    
+            # --- Primary Method ---
+            # Attempt 1: Standard parsing (for YYYY-MM-DD like in sk.csv)
+            data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True)
+            st.caption("Success with standard date format.")
+
+        except (ValueError, pd.errors.ParserError):
+            # --- Fallback Method ---
+            # Attempt 2: Day-first parsing (for DD/MM/YYYY like in nn.csv)
+            st.caption("Standard date parsing failed. Attempting with 'dayfirst=True'...")
+            uploaded_file.seek(0) # Reset pointer again for the next try
+            try:
+                data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
+                st.caption("Success with day-first date format.")
+            except Exception as e_inner:
+                st.error(f"Failed to read CSV with both standard and day-first date formats. Please check your date column. Error: {e_inner}")
+                st.stop()
+
     except Exception as e_outer:
          st.error(f"An unexpected error occurred while reading the CSV: {e_outer}")
          st.stop()
 
-        if data_initial is None: st.error("Could not load data."); st.stop()
-        if not isinstance(data_initial.index, pd.DatetimeIndex):
-             st.error("Could not parse the first column as Dates. Ensure the first column contains dates and is set as index.")
-             uploaded_file.seek(0); st.text("First few lines of the file:"); st.text(uploaded_file.read(500).decode(errors='ignore')); st.stop()
+
+    if data_initial is None:
+        st.error("Could not load data. Please check the file format and content.")
+        st.stop()
+
+    if not isinstance(data_initial.index, pd.DatetimeIndex):
+         st.error("Could not parse the first column as Dates. Ensure the first column contains dates and is set as index.")
+         uploaded_file.seek(0); st.text("First few lines of the file:"); st.text(uploaded_file.read(500).decode(errors='ignore')); st.stop()
+
+    data = data_initial.sort_index()
+    numeric_cols = data.select_dtypes(include=np.number).columns
+    if len(numeric_cols) < data.shape[1]:
+        non_numeric_cols = data.select_dtypes(exclude=np.number).columns
+        st.warning(f"Ignored non-numeric columns: {list(non_numeric_cols)}. Analysis proceeds with numeric columns.")
+        data = data[numeric_cols]
+    if data.empty: st.error("No numeric data found or remaining after selection."); st.stop()
 
         data = data_initial.sort_index()
         numeric_cols = data.select_dtypes(include=np.number).columns

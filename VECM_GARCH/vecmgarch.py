@@ -22,9 +22,8 @@ def df_to_csv_bytes(df, filename="data.csv"):
         st.error(f"Error converting DataFrame {filename} to CSV: {e}")
         return None
 
-# ==============================================================
+
 # Analysis Function
-# ==============================================================
 # ---  ADF Test Function---
 def run_adf_test(series, name=''):
     try:
@@ -230,8 +229,8 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
     # Lag for GARCH
     n_obs = len(residuals)
     lags_lb_garch = 0; lags_arch_garch = 0
-    if n_obs > 1: lags_lb_garch = min(10, max(1, n_obs // 4)) # Lag for Ljung-Box (min 1)
-    if n_obs > 2: lags_arch_garch = min(5, max(1, n_obs // 4 - 1)) # Lag for ARCH test (min 1)
+    if n_obs > 1: lags_lb_garch = min(10, max(1, n_obs // 4)) 
+    if n_obs > 2: lags_arch_garch = min(5, max(1, n_obs // 4 - 1)) 
     if lags_lb_garch <= 0: output_log += "\nWarning: Not enough observations for reliable GARCH Ljung-Box diagnostics."
 
     # Loop for columns in residuals
@@ -346,7 +345,6 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
                 except Exception as e: diag_text += f"\nError Jarque-Bera (Std.Resids): {e}\n"
             else:
                 diag_text += "\nCould not perform GARCH diagnostics: Standardized residuals not available or too few.\n"
-                # erase plot if failed
                 if f'{col}_std_residuals' in garch_plots and garch_plots[f'{col}_std_residuals']:
                     plt.close(garch_plots[f'{col}_std_residuals']); garch_plots[f'{col}_std_residuals'] = None
 
@@ -354,9 +352,8 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
             # Handling error
             error_msg = f"Error during GARCH ({model_desc}) estimation/diagnostics for {col}: {e_garch}"
             output_log += f"\n{error_msg}\nTraceback:\n{traceback.format_exc()}"
-            garch_summaries[col] = error_msg # error message
+            garch_summaries[col] = error_msg 
             diag_text += f"\n{error_msg}\n"
-            # erase plot if its error
             if f'{col}_residuals_input' in garch_plots and garch_plots[f'{col}_residuals_input']: plt.close(garch_plots[f'{col}_residuals_input']); garch_plots[f'{col}_residuals_input'] = None
             if f'{col}_std_residuals' in garch_plots and garch_plots[f'{col}_std_residuals']: plt.close(garch_plots[f'{col}_std_residuals']); garch_plots[f'{col}_std_residuals'] = None
 
@@ -368,10 +365,8 @@ def run_garch_analysis(residuals, garch_model_type="Standard GARCH", garch_p=1, 
     return garch_diagnostics_text, garch_summaries, garch_plots, output_log
 
 
-# ==============================================================
-# Streamlit App Layout
-# ==============================================================
 
+# Streamlit App Layout
 st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
 st.title("VECM-GARCH Analysis (Alpha) ")
 st.markdown("""This application performs VECM, IRF, and GARCH analysis as a default on uploaded time series data.
@@ -383,7 +378,6 @@ For a detailed explanation of the analytical steps and methods used, please scro
 # --- Sidebar ---
 st.sidebar.header("1. Upload Data")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV file (Index: Date)", type=["csv"])
-
 st.sidebar.header("2. Model Parameters")
 # VECM
 st.sidebar.subheader("VECM Settings")
@@ -391,7 +385,7 @@ use_manual_lag = st.sidebar.checkbox("Manually select lag", value=False, key="us
 if use_manual_lag:
     manual_lag = st.sidebar.number_input("Manual VAR Lag (k_ar)", min_value=1, max_value=20, value=2, key="manual_lag")
     lag_criterion = "Manual"
-    max_lags_var = manual_lag  # Set max_lags_var to manual_lag for consistency
+    max_lags_var = manual_lag  
     st.sidebar.markdown("*Using manually selected lag*")
 else:
     lag_criterion = st.sidebar.selectbox("VAR Lag Criterion", ['AIC', 'BIC', 'HQIC', 'FPE'], index=0, key="lag_crit")
@@ -416,15 +410,12 @@ garch_q_order = st.sidebar.number_input("GARCH q order", min_value=0, max_value=
 garch_distribution = st.sidebar.selectbox("GARCH Distribution", ['normal', 't', 'skewt'], index=0, key="garch_dist")
 
 
-# ==============================================================
-# Main Analysis Area
-# ==============================================================
 
+# Main Analysis
 if uploaded_file is not None:
     data = None
     data_initial = None
     try:
-        # --- Data Loading and Preprocessing ---
         try:
             data_initial = pd.read_csv(uploaded_file, index_col=0, parse_dates=True, dayfirst=True)
         except (UnicodeDecodeError, pd.errors.ParserError) as e1:
@@ -461,7 +452,7 @@ if uploaded_file is not None:
             st.error(f"VECM requires at least two numeric variables without missing values. Found {data.shape[1]}: {list(data.columns)}")
             st.stop()
 
-        # --- Frequency Inference ---
+        # Frequency Inference 
         st.subheader("Data Frequency Check")
         inferred_freq = None
         try:
@@ -481,7 +472,7 @@ if uploaded_file is not None:
         st.caption(f"Original file shape: {data_initial.shape}, Processed shape: {data.shape}")
 
 
-        # --- Run Analysis Button ---
+        
         if st.button("Run Full Analysis"):
             if use_manual_lag:
                 info_msg = (f"Running analysis: Manual Lag={manual_lag}, "
@@ -495,7 +486,7 @@ if uploaded_file is not None:
                             f"GARCH={garch_model_type_selection}(p={garch_p_order},q={garch_q_order}), Dist={garch_distribution}")
             st.info(info_msg)
 
-            # Initialize the result variable
+            # result variable
             adf_results_text_dict = {}
             selected_lags = None; lag_summary = "Lag selection not performed."; used_criterion = lag_criterion
             vecm_lag_order = None; r = 0; johansen_summary = "Johansen test not performed."; used_sig = johansen_sig
@@ -563,7 +554,7 @@ if uploaded_file is not None:
                     else: vecm_diagnostics_results = {}; vecm_diagnostics_log = "Skipped VECM diagnostics (no residuals)."
 
                     # --- 5. GARCH Modeling ---
-                    run_garch_modeling = False # Flag to check if GARCH should run
+                    run_garch_modeling = False 
                     if residuals is not None and not residuals.empty:
                         # Check for ARCH effects
                         arch_detected = False
@@ -615,9 +606,9 @@ if uploaded_file is not None:
                         for var_name, results in adf_results_text_dict.items(): st.text_area(f"ADF Results: {var_name}", results, height=200, key=f"adf_{var_name}")
                     else: st.warning("ADF results not available.")
 
-                # ========================================================================
+  
                 # --- Tab 2: VECM Estimation --
-                # ========================================================================
+
                 with tabs[1]:
                     st.header("2. VECM Estimation")
                     st.subheader(f"2.1 VAR Lag Order Selection"); 
@@ -637,10 +628,9 @@ if uploaded_file is not None:
                         with st.expander("Show VECM Estimation Summary"):
                             st.text(vecm_summary if vecm_summary else "Summary not available.")
 
-                        # --- VECM Coefficients Download Button ---
                         st.markdown("**Download VECM Coefficients:**")
                         col1, col2, col3 = st.columns(3)
-
+                        
                         # Alpha (Adjustment)
                         try:
                             alpha_df = pd.DataFrame(vecm_results_model.alpha, index=data.columns, columns=[f'alpha_ect{i+1}' for i in range(r)])
@@ -884,14 +874,11 @@ if uploaded_file is not None:
                     This multi-faceted approach provides insights into both the conditional mean dynamics (VECM) and conditional variance dynamics (GARCH) of your multivariate time series system.
                     """)
 
-                # ========================================================================
+
                 # --- Tab 7: Download Results --
-                # ========================================================================
 
                 with tabs[6]:
                     st.header("7. Download Analysis Results")
-
-
                     zip_buffer = io.BytesIO()
                     try:
                         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -1070,7 +1057,7 @@ else:
     st.markdown("---")
     st.header("VECM-GARCH")
     st.markdown("""
-                       This application performs comprehensive multivariate time series analysis using an integrated approach that combines Vector Error Correction Model (VECM) for capturing long-run equilibrium relationships and short-run dynamics, with Generalized Autoregressive Conditional Heteroskedasticity (GARCH) modeling for analyzing volatility patterns in the residuals.
+                        This application performs comprehensive multivariate time series analysis using an integrated approach that combines Vector Error Correction Model (VECM) for capturing long-run equilibrium relationships and short-run dynamics, with Generalized Autoregressive Conditional Heteroskedasticity (GARCH) modeling for analyzing volatility patterns in the residuals.
                        """)
 
     st.subheader("Theoretical Background")
